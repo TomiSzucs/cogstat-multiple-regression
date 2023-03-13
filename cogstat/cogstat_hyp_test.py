@@ -24,6 +24,7 @@ from statsmodels.stats.contingency_tables import cochrans_q
 from statsmodels.stats.anova import AnovaRM
 from statsmodels.stats.weightstats import DescrStatsW
 import pingouin
+import itertools
 
 from . import cogstat_config as csc
 from . import cogstat_stat_num as cs_stat_num
@@ -925,7 +926,6 @@ def repeated_measures_anova(pdf, var_names, factors=None):
                               for previous_var_name in temp_var_names for i in range(factor[1])]
         temp_var_names = [temp_var_name[1:] for temp_var_name in temp_var_names]
         factor_names = [factor[0] for factor in factors]
-        #print(temp_var_names)
 
         pdf_temp = pdf[var_names]
         pdf_temp.columns = temp_var_names
@@ -933,30 +933,18 @@ def repeated_measures_anova(pdf, var_names, factors=None):
         pdf_long = pd.melt(pdf_temp, id_vars='ID', value_vars=temp_var_names)
         pdf_long = pd.concat([pdf_long, pdf_long['variable'].str.split('_', expand=True).
                              rename(columns={i: factors[i][0] for i in range(len(factors))})], axis=1)
-        # print(pdf[var_names], '\n', pdf_temp, '\n', pdf_long, '\n', factor_names, factors)
+        print(pdf[var_names], '\n', pdf_temp, '\n', pdf_long, '\n', factor_names, factors)
 
         # Assumption tests
-        text_result=''
-        # Testing sphericity in each factor separately
-        for factor_name in factor_names:
-            other_factor_names = [factor for factor in factor_names if factor not in [factor_name]]
-            other_factor_names.append('ID')
-            pdf_long_copy = pdf_long.copy()
-            pdf_long_copy['agg_id'] = pdf_long_copy[other_factor_names].astype(str).agg('_'.join, axis=1)
-            pdf_one_factor = pd.pivot(data=pdf_long_copy, values='value', columns=factor_name, index='agg_id')
-            print(pdf_one_factor)
-            spher, w, chisq, dof, wp = pingouin.sphericity(pdf_one_factor)
-            text_result += _("Result of Mauchly's test to check sphericity in %s") % factor_name + \
-                          ': <i>W</i> = %0.*f, %s. ' % (non_data_dim_precision, w, print_p(wp)) + '\n'
+        text_result = anova_assumptions(pdf, 'int', data_long=pdf_long, repeated_factors='value',
+                                        factor_names=factor_names) + '\n'
 
-        # TODO testing sphericity on interactions of the factors
 
         # Run ANOVA
         anovarm = AnovaRM(pdf_long, 'value', 'ID', factor_names)
         anova_res = anovarm.fit()
 
         # Create the text output
-        #text_result = str(anova_res)
         for index, row in anova_res.anova_table.iterrows():
             factor_names = index.split(':')
             if len(factor_names) == 1:
@@ -968,7 +956,6 @@ def repeated_measures_anova(pdf, var_names, factors=None):
                              non_data_dim_precision, row['F Value'], print_p(row['Pr > F'])))
 
         # TODO post hoc - procedure for any number of factors (i.e., not only for two factors)
-    #print(text_result)
 
     return text_result
 
@@ -1006,36 +993,52 @@ def friedman_test(pdf, var_names):
 
 ### Compare groups ###
 
-def anova_assumptions(data, var_names, meas_lev, grouping_vars, repeated_factors=None, data_long=None, multiindex=None):
+def anova_assumptions(data, meas_lev,  var_names=None, grouping_vars=None, repeated_factors=None, factor_names=None, data_long=None):
     # TODO do we need this here or is it redundant?
     data.dropna()
 
-    # Making joint grouping variable
-    joined_groups = []
-    for i in range(0, len(grouping_vars)):
-        if i == 0:
-            joined_groups = data[grouping_vars[i]].astype(str)
-        else:
-            joined_groups = joined_groups + " - " + data[grouping_vars[i]].astype(str)
-    data['joined_groups'] = joined_groups
+    if grouping_vars:
+        # Making joint grouping variable
+        joined_groups = []
+        for i in range(0, len(grouping_vars)):
+            if i == 0:
+                joined_groups = data[grouping_vars[i]].astype(str)
+            else:
+                joined_groups = joined_groups + " - " + data[grouping_vars[i]].astype(str)
+        data['joined groups'] = joined_groups
 
-    non_normal_vars = []
-    norm_text = ''
-    for var_name in var_names:
-        for group in data['joined_groups'].unique():
-            norm, text_result = normality_test(data, data_measlevs=meas_lev, var_name=var_name,
-                                               group_name='joined_groups', group_value=group)
-            norm_text += text_result
-            if not norm:
-                non_normal_vars.append(group)
-    var_hom_p, var_text_result = levene_test(data, var_name=var_names[0], group_name='joined_groups')
+        non_normal_vars = []
+        norm_text = ''
+        for var_name in var_names:
+            # TODO do we need this for loop on var_names?
+            for group in data['joined groups'].unique():
+                norm, text_result = normality_test(data, data_measlevs=meas_lev, var_name=var_name,
+                                                   group_name='joined groups', group_value=group)
+                norm_text += text_result
+                if not norm:
+                    non_normal_vars.append(group)
+        var_hom_p, var_text_result = levene_test(data, var_name=var_names[0], group_name='joined groups')
 
     if repeated_factors:
         # TODO test with input from future mixed anova implementation
-        data_repeated = data[repeated_factors]
-        spher, w, chisq, dof, wp = pingouin.sphericity(data_repeated)
+        text_result = '<decision>' + _('Testing sphericity in each factor and their interactions') + '</decision>' + '\n'
+        factor_names_comb = []
+        for i in range(1, len(factor_names) + 1):
+            factor_names_comb += list(list(i) for i in itertools.combinations(factor_names, i))
+        for factor_name in factor_names_comb:
+            if len(factor_name) > 2:
+                text_result += '<decision>' + _("Sphericity tests not implemented for the interaction of more than 2 factors.") \
+                               + '</decision>' + '\n'
+                continue
+            other_factor_names = [factor for factor in factor_names if factor not in factor_name] + ['ID']
+            data_long['agg_id'] = data_long[other_factor_names].astype(str).agg('_'.join, axis=1)
+            data_combination = pd.pivot(data=data_long, values='value', columns=factor_name, index='agg_id')
+            spher, w, chisq, dof, wp = pingouin.sphericity(data_combination)
+            text_result += _("Result of Mauchly's test to check sphericity in %s") % \
+                           (', '.join(factor_name) if len(factor_name) > 1 else factor_name[0]) + \
+                          ': <i>W</i> = %0.*f, %s. ' % (non_data_dim_precision, w, print_p(wp)) + '\n'
 
-        return non_normal_vars, norm_text, var_hom_p, var_text_result, spher, w, chisq, dof, wp
+        return text_result
     else:
         return non_normal_vars, norm_text, var_hom_p, var_text_result
 
