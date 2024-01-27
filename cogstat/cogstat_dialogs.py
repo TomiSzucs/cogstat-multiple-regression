@@ -951,8 +951,7 @@ class compare_groups_dialog(QtWidgets.QDialog, compare_groups.Ui_Dialog):
         _remove_item_from_list_widget(self.source_listWidget, self.selected_listWidget, self.names)
 
     def add_group(self):
-        if self.group_listWidget.count() < 2:  # allow maximum two grouping variables
-            _add_to_list_widget(self.source_listWidget, self.group_listWidget)
+        _add_to_list_widget(self.source_listWidget, self.group_listWidget)
     def remove_group(self):
         _remove_item_from_list_widget(self.source_listWidget, self.group_listWidget, self.names)
 
@@ -971,6 +970,48 @@ class compare_groups_dialog(QtWidgets.QDialog, compare_groups.Ui_Dialog):
                 [str(self.group_listWidget.item(i).text()) for i in range(self.group_listWidget.count())],
                 self.displayfactors,
                 self.single_case_slope_SE, int(self.single_case_slope_trial_n), self.ylims)
+
+
+from .ui import display_options_mixed
+class display_options_mixed_dialog(QtWidgets.QDialog, display_options_mixed.Ui_Dialog):
+    def __init__(self, parent=None):
+        QtWidgets.QDialog.__init__(self, parent)
+        self.setupUi(self)
+        self.setModal(True)
+        self.buttonBox.accepted.connect(self.accept)
+        self.buttonBox.rejected.connect(self.reject)
+        self.factor_x_listWidget.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.DragDrop)
+        self.factor_x_listWidget.setDefaultDropAction(QtCore.Qt.MoveAction)
+        self.factor_color_listWidget.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.DragDrop)
+        self.factor_color_listWidget.setDefaultDropAction(QtCore.Qt.MoveAction)
+        self.factor_color_listWidget.doubleClicked.connect(self.remove_color)
+        self.factor_panel_listWidget.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.DragDrop)
+        self.factor_panel_listWidget.setDefaultDropAction(QtCore.Qt.MoveAction)
+        self.factor_panel_listWidget.doubleClicked.connect(self.remove_panel)
+        self.add_color_button.clicked.connect(self.add_color)
+        self.remove_color_button.clicked.connect(self.remove_color)
+        self.add_panel_button.clicked.connect(self.add_panel)
+        self.remove_panel_button.clicked.connect(self.remove_panel)
+
+    def set_factors(self, factors=None):
+        self.factors = factors
+        _prepare_list_widgets(self.factor_x_listWidget, self.factors, [self.factor_color_listWidget, self.factor_panel_listWidget])
+    def add_color(self):
+        _add_to_list_widget(self.factor_x_listWidget, self.factor_color_listWidget)
+    def remove_color(self):
+        _remove_item_from_list_widget(self.factor_x_listWidget, self.factor_color_listWidget, self.factors)
+    def add_panel(self):
+        _add_to_list_widget(self.factor_x_listWidget, self.factor_panel_listWidget)
+    def remove_panel(self):
+        _remove_item_from_list_widget(self.factor_x_listWidget, self.factor_panel_listWidget, self.factors)
+    def read_parameters(self):
+        return ([[str(self.factor_x_listWidget.item(i).text()) for i in range(self.factor_x_listWidget.count())] if
+                self.factor_x_listWidget.count() else [],
+                [str(self.factor_color_listWidget.item(i).text()) for i in range(self.factor_color_listWidget.count())] if
+                self.factor_color_listWidget.count() else [],
+                [str(self.factor_panel_listWidget.item(i).text()) for i in range(self.factor_panel_listWidget.count())] if
+                self.factor_panel_listWidget.count() else []],
+                [_float_or_none(self.minimum_y.text()), _float_or_none(self.maximum_y.text())])
 
 
 from .ui import compare_vars_groups
@@ -1000,7 +1041,7 @@ class compare_vars_groups_dialog(QtWidgets.QDialog, compare_vars_groups.Ui_Dialo
 
         self.slope_dialog = compare_groups_single_case_slope_dialog(self)
         self.factors_dialog = factors_dialog(self)
-        self.display_options_groups_dialog = display_options_groups_dialog(self)
+        self.display_options_mixed_dialog = display_options_mixed_dialog(self)
         self.factors = []
         self.displayfactors = [[], []]
         self.single_case_slope_SE, self.single_case_slope_trial_n = [], 0
@@ -1074,11 +1115,11 @@ class compare_vars_groups_dialog(QtWidgets.QDialog, compare_vars_groups.Ui_Dialo
                 self.show_factors()
                 # modify self.displayfactors too because the user possibly changed the factors without changing the
                 #  display options (where self.displayfactors are set)
-                self.display_options_groups_dialog. \
+                self.display_options_mixed_dialog. \
                     set_factors(factors=[str(self.group_listWidget.item(i).text())
                                          for i in range(self.group_listWidget.count())] +
                                         [factor[0] for factor in self.factors])
-                self.displayfactors, self.ylims = self.display_options_groups_dialog.read_parameters()
+                self.displayfactors, self.ylims = self.display_options_mixed_dialog.read_parameters()
             else:  # remove the factor levels if there is no explicit factor level
                 previously_used_vars = []
                 for i in range(self.selected_listWidget.count()):
@@ -1109,12 +1150,12 @@ class compare_vars_groups_dialog(QtWidgets.QDialog, compare_vars_groups.Ui_Dialo
             self.factors = [[_('Unnamed factor'), self.selected_listWidget.count()]]
             restore_factors = True  # if Display option is cancelled, then remove Unnamed factor
             default_factor_added = True
-        self.display_options_groups_dialog.\
+        self.display_options_mixed_dialog.\
             set_factors(factors=[str(self.group_listWidget.item(i).text())
                                  for i in range(self.group_listWidget.count())] +
                                 [factor[0] for factor in self.factors])
-        if self.display_options_groups_dialog.exec_():
-            self.displayfactors, self.ylims = self.display_options_groups_dialog.read_parameters()
+        if self.display_options_mixed_dialog.exec_():
+            self.displayfactors, self.ylims = self.display_options_mixed_dialog.read_parameters()
             self.show_factors()
         else:  # if Display option is cancelled, then remove Unnamed factor
             if default_factor_added:  # do not remove Unnamed factor if dialog is Cancelled but factor was added
@@ -1237,15 +1278,21 @@ class preferences_dialog(QtWidgets.QDialog, preferences.Ui_Dialog):
         QtWidgets.QDialog.__init__(self, parent)
         self.setupUi(self)
         self.setModal(True)
-        self.buttonBox.accepted.connect(self.write_settings)
+        self.buttonBox.accepted.connect(self.write_and_apply_settings)
         self.buttonBox.rejected.connect(self.reject)
     
         self.init_langs()
         self.init_themes()
 
+        # Init image format
         image_formats = ['png', 'svg']
         self.image_combo_box.addItems(image_formats)
         self.image_combo_box.setCurrentIndex(image_formats.index(csc.image_format))
+
+        # Init detailed error message
+        error_messages = [_('Off'), _('On')]
+        self.error_combo_box.addItems(error_messages)
+        self.error_combo_box.setCurrentIndex(error_messages.index(error_messages[csc.detailed_error_message]))
 
     def init_langs(self):
         """Set the available languages.
@@ -1266,8 +1313,8 @@ class preferences_dialog(QtWidgets.QDialog, preferences.Ui_Dialog):
         langs = sorted(['en']+available_langs(domain='cogstat', localedir=os.path.dirname(os.path.abspath(__file__)) +
                                                                           '/locale'))
         # local language names based on https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes
-        lang_names = {'bg': 'Български (Bulgarian)', 'de': 'Deutsch (German)', 'en': 'English',
-                      'el': 'Ελληνικά (Greek)', 'es': 'Español (Spanish)',
+        lang_names = {'ar': 'العربية (Arabic)', 'bg': 'Български (Bulgarian)', 'de': 'Deutsch (German)',
+                      'en': 'English', 'el': 'Ελληνικά (Greek)', 'es': 'Español (Spanish)',
                       'et': 'Eesti (Estonian)', 'fa': 'فارسی (Persian)',
                       'fr': 'Français (French)', 'he': 'עברית (Hebrew)',
                       'hr': 'Hrvatski (Croatian)', 'hu': 'Magyar (Hungarian)', 'it': 'Italiano (Italian)',
@@ -1276,7 +1323,7 @@ class preferences_dialog(QtWidgets.QDialog, preferences.Ui_Dialog):
                       'ro': 'Română (Romanian)', 'ru': 'Русский (Russian)', 'sk': 'Slovenčina (Slovak)',
                       'th': 'ไทย (Thai)', 'tr': 'Türkçe (Turkish)', 'zh': '汉语 (Chinese)'}
         lang_names_sorted = sorted([lang_names[lang] for lang in langs])
-        self.lang_codes = {lang_name:lang_code for lang_code, lang_name in zip(lang_names.keys(), lang_names.values())}
+        self.lang_codes = {lang_name: lang_code for lang_code, lang_name in zip(lang_names.keys(), lang_names.values())}
 
         self.langComboBox.clear()
         for lang_name in lang_names_sorted:
@@ -1294,10 +1341,22 @@ class preferences_dialog(QtWidgets.QDialog, preferences.Ui_Dialog):
             self.themeComboBox.addItem(theme)
         self.themeComboBox.setCurrentIndex(themes.index(csc.theme))
 
-    def write_settings(self):
-        """Save the settings when OK is pressed.
+    def write_and_apply_settings(self):
+        """Save the settings when OK is pressed. Apply the settings so that restart is not needed.
         """
-        csc.save(['language'], self.lang_codes[str(self.langComboBox.currentText())])
-        csc.save(['graph', 'theme'], str(self.themeComboBox.currentText()))
-        csc.save(['graph', 'format'], str(self.image_combo_box.currentText()))
+        from . import cogstat_chart as cs_chart
+
+        # Language
+        csc.save('language', self.lang_codes[str(self.langComboBox.currentText())])
+        # Theme
+        csc.theme = str(self.themeComboBox.currentText())
+        cs_chart.set_matplotlib_theme()
+        csc.save('theme', csc.theme)
+        # Image format
+        csc.image_format = str(self.image_combo_box.currentText())
+        csc.save('image_format', csc.image_format)
+        # Detailed error message
+        csc.detailed_error_message = bool(self.error_combo_box.currentIndex())
+        csc.save('detailed_error_message', str(csc.detailed_error_message))
+
         self.accept()

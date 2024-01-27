@@ -67,7 +67,7 @@ rtl_lang = True if csc.language in ['he', 'fa', 'ar'] else False
 broken_analysis = '<cs_h1>%s</cs_h1>' + \
                   _('Oops, something went wrong, CogStat could not run the analysis. You may want to report it.') \
                   + ' ' + _('Read more about how to report an issue <a href = "%s">here</a>.') \
-                  % 'https://github.com/cogstat/cogstat/wiki/Report-a-bug'
+                  % 'https://doc.cogstat.org/Report-a-bug'
 
 
 class StatMainWindow(QtWidgets.QMainWindow):
@@ -90,7 +90,7 @@ class StatMainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, 'Incomplete installation', 'Install missing component(s): ' +
                                            ''.join([x+', ' for x in
                                                     missing_required_components+missing_recommended_components])[:-2] +
-                                           '.<br><br>' + '<a href = "https://github.com/cogstat/cogstat/wiki/'
+                                           '.<br><br>' + '<a href = "https://doc.cogstat.org/'
                                                          'Installation">Visit the installation help page</a> to see how '
                                                          'to complete the installation.', QtWidgets.QMessageBox.Ok)
             if missing_required_components:
@@ -199,7 +199,7 @@ class StatMainWindow(QtWidgets.QMainWindow):
                                  'Ctrl+P', 'self.compare_variables', True, True],
                                 ['/icons8-bar-chart.svg', _('Compare &groups')+'...', 'Ctrl+G',
                                  'self.compare_groups', True, True],
-                                ['/icons8-combo-chart-50.png', _('Compare repeated &measures variables and groups')+'...',
+                                ['/icons8-combo-chart-100.png', _('Compare repeated &measures variables and groups')+'...',
                                  'Ctrl+M', 'self.compare_variables_groups', True, True],
                                 ['separator'],
                                 ['toolbar separator'],
@@ -318,6 +318,8 @@ class StatMainWindow(QtWidgets.QMainWindow):
         self.splitter = QtWidgets.QSplitter(self.centralwidget)
         self.table_view = QtWidgets.QTableView(self.splitter)
         self.table_view.horizontalHeader().setStretchLastSection(True)
+        self.table_view.horizontalHeader().setDefaultAlignment(QtCore.Qt.AlignLeft)
+        self.table_view.horizontalHeader().setTextElideMode(QtCore.Qt.ElideRight)
         self.result_pane = QtWidgets.QTextBrowser(self.splitter)  # QTextBrowser can handle links, QTextEdit cannot
         self.splitter.setOrientation(QtCore.Qt.Horizontal)
         self.splitter.setStretchFactor(0, 2)
@@ -330,11 +332,13 @@ class StatMainWindow(QtWidgets.QMainWindow):
         # Currently, it doesn't make sense to use a loop here, but we keep it, until we decide how to implement the ToC
         for pane in [self.result_pane]:
             # some html styles are modified for the GUI version (but not for the Jupyter Notebook version)
+            # Because qt does not support table borders, use padding to have a more reviewable table
             pane.document().setDefaultStyleSheet('body {color:black;} '
                                                  'h2 {color:%s;} h3 {color:%s;} '
                                                  'h4 {color:%s;} h5 {color:%s; font-size: medium;} '
-                                                 '.table_cs_pd th {font-weight:normal; white-space:nowrap} '
-                                                 'td {white-space:nowrap}' %
+                                                 'th {font-weight:normal; white-space:nowrap; '
+                                                 'padding-right: 5px; padding-left: 5px} '
+                                                 'td {white-space:nowrap; padding-right: 5px; padding-left: 5px}' %
                                                  (cs_util.change_color(csc.mpl_theme_color, brightness=1.1),
                                                   cs_util.change_color(csc.mpl_theme_color, brightness=1.0),
                                                   cs_util.change_color(csc.mpl_theme_color, brightness=0.8),
@@ -356,7 +360,7 @@ class StatMainWindow(QtWidgets.QMainWindow):
                                  ('<cs_h1>', _('Welcome to CogStat!'), '</cs_h1>',
                                  _('CogStat makes statistical analysis more simple and efficient.'),
                                  _('To start working open a data file or paste your data from a spreadsheet.'),
-                                 _('Find more information about CogStat on its <a href = "https://www.cogstat.org">webpage</a> or read the <a href="https://github.com/cogstat/cogstat/wiki/Quick-Start-Tutorial">quick start tutorial.</a>'))
+                                 _('Find more information about CogStat on its <a href = "https://www.cogstat.org">webpage</a> or read the <a href="https://doc.cogstat.org/Quick-Start-Tutorial">quick start tutorial.</a>'))
         data_welcome_message = '%s%s%s%s<br>' % \
                                ('<cs_h1>', _('Data view'), '</cs_h1>',
                                _('To start working open a data file or paste your data from a spreadsheet.'))
@@ -452,7 +456,7 @@ class StatMainWindow(QtWidgets.QMainWindow):
                 QtWidgets.QApplication.restoreOverrideCursor()
             #QtGui.QApplication.setOverrideCursor(QtGui.QCursor(QtCore.Qt.ArrowCursor))
         
-    def _print_to_pane(self, pane=None, output_list=None):
+    def _print_to_pane(self, pane=None, output_list=None, scroll_to_analysis=True):
         """Print a GuiResultPackage to the output or data pane.
 
         The pane should have a pane.welcome_message_on property.
@@ -461,8 +465,10 @@ class StatMainWindow(QtWidgets.QMainWindow):
         ----------
         pane : QtWidgets.QTextBrowser object
             The pane the message should be printed to.
-        output_list : list of str (html) or matplotlib.figure.Figure
-            List of items to display
+        output_list : list of str (html) or matplotlib figure or pandas dataframe styler
+            Flat list of items to display
+        scroll_to_analysis : bool
+            Should the pane scroll to the beginning of the analysis?
 
         Returns
         -------
@@ -519,12 +525,28 @@ class StatMainWindow(QtWidgets.QMainWindow):
                         format(base64.b64encode(svg_fig.to_str()).decode())
                     #print('SVG svgutils size', sys.getsizeof(html_img))
                 pane.append(html_img)
+            elif isinstance(output, pd.io.formats.style.Styler):
+                # Styler may have pipe_func attribute, which should be a function, which will be run right before
+                # converting the Styler to html
+                if hasattr(output, 'pipe_func'):
+                    pipe_func = output.pipe_func
+                else:
+                    pipe_func = lambda x: x
+                # 1. make row headers left aligned
+                # 2. headers use None formatter resulting in a format used in DataFrame.to_html() for floats
+                # 3. call pipe_func if availabe
+                # 4. convert to html, and remove \n-s
+                pane.append(output.set_table_styles([{'selector': 'th.row_heading', 'props': 'text-align: left;'}]).
+                            format_index(formatter='{}', axis=0).format_index(formatter='{}', axis=1).
+                            pipe(pipe_func).
+                            to_html().replace('\n', ''))
             elif output is None:
                 pass  # We don't do anything with None-s
             else:
                 logging.error('Unknown output type: %s' % type(output))
         self.unsaved_output = True
-        pane.scrollToAnchor(anchor)
+        if scroll_to_analysis:
+            pane.scrollToAnchor(anchor)
         plt.close('all')  # free memory after everything is displayed
         #pane.moveCursor(QtGui.QTextCursor.End)
 
@@ -550,8 +572,10 @@ class StatMainWindow(QtWidgets.QMainWindow):
             data_to_display['cogstat_filtered_cases'] = 1
             # Modify the included cases.
             data_to_display['cogstat_filtered_cases'][self.active_data.data_frame.index] = 0
-            # Start row numbers from 1, instead of 0.
-            data_to_display.index = data_to_display.index + 1
+            # Start row numbers from 1, instead of 0, if it starts with 0 (as in default index).
+            # Otherwise, keep the original index.
+            if data_to_display.index[0] == 0:
+                data_to_display.index = data_to_display.index + 1
             # Add the variable type and measurement level to the dataframe.
             dtype_convert = {'int32': 'num', 'int64': 'num', 'float32': 'num', 'float64': 'num',
                              'object': 'str', 'string': 'str', 'category': 'str', 'datetime64[ns]': 'str'}
@@ -568,7 +592,7 @@ class StatMainWindow(QtWidgets.QMainWindow):
             self.table_view.setColumnHidden(model.columnCount() - 1, True)
             self.table_view.show()
 
-    def _run_analysis(self, title, function_name, parameters=None):
+    def _run_analysis(self, title, function_name, parameters=None, scroll_to_analysis=True):
         """Run an analysis by calling the function with the parameters.
         If it fails, provide an error message with the title as heading.
 
@@ -580,6 +604,8 @@ class StatMainWindow(QtWidgets.QMainWindow):
             Name of the function or method that implements the analysis
         parameters : dict
             Optional parameters
+        scroll_to_analysis : bool
+            Should the pane scroll to the beginning of the analysis?
 
         Returns
         -------
@@ -605,9 +631,12 @@ class StatMainWindow(QtWidgets.QMainWindow):
                 result = attrgetter(function_rest_levels)(locals()[function_highest_level])(**parameters)
             self.analysis_results[-1].add_output(result)
         except Exception as e:
-            # TODO consider adding the Python error message to the results pane (maybe optional, set in Preferences)
-            # _('Error code') + ': %s' % e
-            self.analysis_results[-1].add_output(cs_util.convert_output([broken_analysis % title]))
+            if csc.detailed_error_message:
+                error_message = '\n' + '<cs_warning>' + _('Detailed error message') + \
+                                ' (%s):</cs_warning>\n' % 'you can turn this off in Preferences' + traceback.format_exc()
+            else:
+                error_message = ''
+            self.analysis_results[-1].add_output(cs_util.convert_output([broken_analysis % title, error_message]))
             if title == _('Data'):  # Data import-specific error message
                 data = parameters['data']
                 try:
@@ -616,11 +645,12 @@ class StatMainWindow(QtWidgets.QMainWindow):
                 except:
                     file_content = ''
                 self.analysis_results[-1].add_output(cs_util.convert_output(
-                    [_('Data to be imported') + ':<br>%s<br>%s' % (data, file_content)]))
+                    ['<cs_warning>' + _('Data to be imported') + ':</cs_warning><br>%s<br>%s' % (data, file_content)]))
                 self._display_data(reset=True)
             traceback.print_exc()
             successful_run = False
-        self._print_to_pane(pane=self.result_pane, output_list=self.analysis_results[-1].output)
+        self._print_to_pane(pane=self.result_pane, output_list=self.analysis_results[-1].output,
+                            scroll_to_analysis=scroll_to_analysis)
         self._busy_signal(False)
         return successful_run
 
@@ -772,9 +802,10 @@ class StatMainWindow(QtWidgets.QMainWindow):
                     var_names = ['']  # error message for missing variable come from the explore_variable() method
             else:
                 return
-        for var_name in var_names:
+        for i, var_name in enumerate(var_names):
             self._run_analysis(title=_('Explore variable'), function_name='self.active_data.explore_variable',
-                               parameters={'var_name': var_name, 'frequencies': freq, 'central_value': loc_test_value})
+                               parameters={'var_name': var_name, 'frequencies': freq, 'central_value': loc_test_value},
+                               scroll_to_analysis=not i)
 
     def explore_variable_pair(self, var_names=None, xlims=[None, None], ylims=[None, None]):
         """Explore variable pairs.
@@ -800,13 +831,16 @@ class StatMainWindow(QtWidgets.QMainWindow):
                 return
         if len(var_names) < 2:
             var_names = (var_names + [None, None])[:2]  # regression() method handles the missing variables
+        scroll_to_analysis = True
         for x in var_names:
             pass_diag = False
             for y in var_names:
                 if pass_diag:
                     self._run_analysis(title=_('Explore relation of variable pair'),
                                        function_name='self.active_data.regression',
-                                       parameters={'predictors': [x], 'predicted': y, 'xlims': xlims, 'ylims': ylims})
+                                       parameters={'predictors': [x], 'predicted': y, 'xlims': xlims, 'ylims': ylims},
+                                       scroll_to_analysis=scroll_to_analysis)
+                    scroll_to_analysis = False
                 if x == y:
                     pass_diag = True
             if x is None:  # with [None, None] var_names regression() is called only once
@@ -885,7 +919,7 @@ class StatMainWindow(QtWidgets.QMainWindow):
             else:
                 return
         # use the original term in the function call, not the translated one
-        reaction_time_in = 'sec' if reaction_time_in == _('sec') else 'msec'
+        reaction_time_in = 'sec' if reaction_time_in == _('s') else 'msec'
         self._run_analysis(title=_('Behavioral data diffusion analysis'), function_name='self.active_data.diffusion',
                            parameters={'error_name': error_name, 'RT_name': RT_name,
                                        'participant_name': participant_name, 'condition_names': condition_names,
@@ -932,12 +966,13 @@ class StatMainWindow(QtWidgets.QMainWindow):
                     var_names = [None]  # compare_groups() method handles the missing parameters
             else:
                 return
-        for var_name in var_names:
+        for i, var_name in enumerate(var_names):
             self._run_analysis(title=_('Compare groups'), function_name='self.active_data.compare_groups',
                                parameters={'var_name': var_name, 'grouping_variables': groups,
                                            'display_groups': display_groups,
                                            'single_case_slope_SE': single_case_slope_SE,
-                                           'single_case_slope_trial_n': single_case_slope_trial_n, 'ylims': ylims})
+                                           'single_case_slope_trial_n': single_case_slope_trial_n, 'ylims': ylims},
+                               scroll_to_analysis=not i)
 
     def compare_variables_groups(self, var_names=None, groups=None, factors=None, display_factors=None,
                                  single_case_slope_SE=None, single_case_slope_trial_n=None, ylims=[None, None]):
@@ -1071,16 +1106,16 @@ class StatMainWindow(QtWidgets.QMainWindow):
 
     ### Cogstat menu methods ###
     def _open_help_webpage(self):
-        webbrowser.open('https://github.com/cogstat/cogstat/wiki/Documentation-for-users')
+        webbrowser.open('https://doc.cogstat.org/')
         
     def _show_preferences(self):
         self.dial_pref.exec_()
     
     def _open_reqfeat_webpage(self):
-        webbrowser.open('https://github.com/cogstat/cogstat/wiki/Suggest-a-new-feature')
+        webbrowser.open('https://doc.cogstat.org/Suggest-a-new-feature')
         
     def _open_reportbug_webpage(self):
-        webbrowser.open('https://github.com/cogstat/cogstat/wiki/Report-a-bug')
+        webbrowser.open('https://doc.cogstat.org/Report-a-bug')
         
     def _show_about(self):
         QtWidgets.QMessageBox.about(self, _('About CogStat ') + csc.versions['cogstat'], 'CogStat ' +

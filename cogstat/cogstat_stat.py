@@ -95,19 +95,6 @@ def _split_into_groups(pdf, var_name, grouping_name):
     return level_combinations, grouped_data
 
 
-def _format_html_table(html_table):
-    """Format html table
-
-    :return: str html
-    """
-    if csc.output_type == 'gui':
-        # Because qt does not support table borders, use padding to have a more reviewable table
-        return '<style> th, td {padding-right: 5px; padding-left: 5px} </style>' + html_table.replace('\n', '').\
-            replace('border="1"', 'style="border:1px solid black;"')
-    else:
-        return html_table.replace('\n', '').replace('border="1"', 'style="border:1px solid black;"')
-
-
 def pivot(pdf, row_names, col_names, page_names, depend_name, function):
     """Build a pivot table.
 
@@ -198,8 +185,8 @@ def pivot(pdf, row_names, col_names, page_names, depend_name, function):
                     for index_i in range(ptable.index.nlevels):
                         if is_string_dtype(ptable.index.get_level_values(index_i)):
                             ptable.sort_index(level=index_i, inplace=True, key=lambda x: x.str.lower())
-                ptable_result = '%s\n%s' % (ptable_result, _format_html_table(ptable.
-                                            to_html(bold_rows=False, sparsify=False, float_format=format_output)))
+                ptable_result = '%s\n%s' % (ptable_result, ptable.to_html(bold_rows=False, sparsify=False,
+                                                                          float_format=format_output).replace('\n', ''))
             else:
                 temp_result = eval(function_code[function])(np.array(df[depend_name]))
                 # TODO convert to html output; when ready stop using fix_width_font
@@ -241,6 +228,7 @@ def diffusion(df, error_name='', RT_name='', participant_name='', condition_name
 
     Returns
     -------
+    list of str and pandas Stylers
 
     """
 
@@ -253,7 +241,7 @@ def diffusion(df, error_name='', RT_name='', participant_name='', condition_name
 
     # Variable information
     result = ''
-    result += _('Used variables.') + ' ' + _('Error: %s, Reaction time: %s, Participant: %s, Condition(s): %s') % \
+    result += _('Used variables') + '. ' + _('Error: %s, Reaction time: %s, Participant: %s, Condition(s): %s') % \
               (error_name, RT_name, participant_name if participant_name != '' else _('None'),
                ','.join(condition_names) if condition_names != [] else _('None'))
 
@@ -279,14 +267,14 @@ def diffusion(df, error_name='', RT_name='', participant_name='', condition_name
     # If any data is missing from a trial, drop the whole trial
     df_diff = df_diff.dropna(subset=[error_name] + [RT_name] + [participant_name] + condition_names)
     missing_trials_n = len(df) - len(df_diff)
-    result += '\n\n' + _('Number of trials excluded because of missing data:') + \
-              ' %s (%.1f%%)\n' % (missing_trials_n, (missing_trials_n / len(df)) * 100)
+    result += '\n\n' + _('Number of trials excluded because of missing data') + \
+              ': %s (%.1f%%)\n' % (missing_trials_n, (missing_trials_n / len(df)) * 100)
 
     # Filter slow outlier cases
     filtered_trials_n = len(df_diff) - len(df_diff[df_diff[RT_name] < max_reaction_time])
     df_diff = df_diff[df_diff[RT_name] < max_reaction_time]
-    result += _('Number of trials excluded because reaction time was larger than %s sec:') % max_reaction_time + \
-              ' %s (%.1f%%)\n' % (filtered_trials_n, (filtered_trials_n / len(df)) * 100)
+    result += _('Number of trials excluded because reaction time was larger than %s seconds') % max_reaction_time + \
+              ': %s (%.1f%%)\n' % (filtered_trials_n, (filtered_trials_n / len(df)) * 100)
 
     # 2. Calculate N, RT, and error rate statistics
     n_table = pd.pivot_table(df_diff, values=error_name, index=participant_name, columns=condition_names, aggfunc=len)
@@ -308,16 +296,15 @@ def diffusion(df, error_name='', RT_name='', participant_name='', condition_name
             var_correct_RT_table.sort_index(inplace=True, key=lambda x: x.str.lower())
             mean_percent_correct_table.sort_index(inplace=True, key=lambda x: x.str.lower())
 
-    # Display RT and error rate statistics
-    previous_precision = pd.get_option('display.precision')
-    pd.set_option('display.precision', 3)  # thousandth in error, milliseconds in RT, thousandths in diffusion parameters
-    result += '\n\n' + _('Number of trials') + _format_html_table(n_table.to_html(bold_rows=False))
-    result += '\n\n' + _('Mean percent correct with edge correction') + _format_html_table(mean_percent_correct_table.
-                                                                                           to_html(bold_rows=False))
-    result += '\n\n' + _('Mean correct reaction time') + _format_html_table(mean_correct_RT_table.
-                                                                            to_html(bold_rows=False))
-    result += '\n\n' + _('Correct reaction time variance') + _format_html_table(var_correct_RT_table.
-                                                                                to_html(bold_rows=False))
+    # Display N, RT, and error rate statistics
+    precision = 3  # thousandth in error, milliseconds in RT, thousandths in diffusion parameters
+    n_table_styler = n_table.style.set_caption(_('Number of trials')).format(precision=precision)
+    mean_percent_correct_styler = mean_percent_correct_table.style.\
+        set_caption(_('Mean percent correct with edge correction')).format(precision=precision)
+    mean_correct_RT_styler = mean_correct_RT_table.style.set_caption(_('Mean correct reaction time')).\
+        format(precision=precision)
+    var_correct_RT_styler = var_correct_RT_table.style.set_caption(_('Correct reaction time variance')).\
+        format(precision=precision)
 
     # 3. Recover diffusion parameters
     original_index = mean_percent_correct_table.index  # to recover index order later
@@ -337,12 +324,14 @@ def diffusion(df, error_name='', RT_name='', participant_name='', condition_name
     nondecision_time_table = nondecision_time_table.reindex(index=original_index, columns=original_columns)
 
     # Display diffusion parameters
-    result += '\n\n' + _('Drift rate') + _format_html_table(drift_rate_table.to_html(bold_rows=False))
-    result += '\n\n' + _('Threshold') + _format_html_table(threshold_table.to_html(bold_rows=False))
-    result += '\n\n' + _('Nondecision time') + _format_html_table(nondecision_time_table.to_html(bold_rows=False))
-    pd.set_option('display.precision', previous_precision)
+    drift_rate_styler = drift_rate_table.style.set_caption(_('Drift rate')).format(precision=precision)
+    threshold_styler = threshold_table.style.set_caption(_('Threshold')).format(precision=precision)
+    nondecision_time_styler = nondecision_time_table.style.set_caption(_('Nondecision time')).\
+        format(precision=precision)
 
-    return result
+    return [result,
+            n_table_styler, mean_percent_correct_styler, mean_correct_RT_styler, var_correct_RT_styler,
+            drift_rate_styler, threshold_styler, nondecision_time_styler]
 
 
 def safe_var_names(names):  # TODO not used at the moment. maybe could be deleted.
@@ -395,9 +384,8 @@ def frequencies(pdf, var_name, meas_level):
     freq[_('Rel freq')] = pdf[var_name].value_counts(normalize=True).sort_index() * 100
     if meas_level != 'nom':
         freq[_('Cum rel freq')] = freq[_('Rel freq')].cumsum()
-    text_result = _format_html_table(freq.to_html(formatters={_('Rel freq'): lambda x: '%.1f%%' % x,
-                                                              _('Cum rel freq'): lambda x: '%.1f%%' % x},
-                                                  bold_rows=False, index=False, classes="table_cs_pd"))
+    text_result = freq.to_html(formatters={_('Rel freq'): lambda x: '%.1f%%' % x, _('Cum rel freq'):
+        lambda x: '%.1f%%' % x}, bold_rows=False, index=False).replace('\n', '')
     return text_result
 
 
@@ -421,12 +409,11 @@ def proportions_ci(pdf, var_name):
     proportions_ci_np = proportion.multinomial_proportions_confint(proportions)
     proportions_ci_pd = pd.DataFrame(proportions_ci_np, index=proportions.index, columns=[_('low'), _('high')]) * 100
     text_result = '%s - %s\n%s' % (_('Relative frequencies'), _('95% confidence interval (multinomial proportions)'),
-                                   _format_html_table(proportions_ci_pd.to_html(bold_rows=False,
-                                                                                float_format=lambda x: '%.1f%%' % x,
-                                                                                classes="table_cs_pd")))
+                                   proportions_ci_pd.to_html(bold_rows=False,float_format=lambda x: '%.1f%%' % x).
+                                   replace('\n', ''))
     if (pdf[var_name].value_counts() < 5).any():
-        text_result += '<warning>' + _('Some of the cells do not include at least 5 cases, so the confidence '
-                                       'intervals may be invalid.') + '</warning>\n'
+        text_result += '<cs_warning>' + _('Some of the cells do not include at least 5 cases, so the confidence '
+                                       'intervals may be invalid.') + '</cs_warning>\n'
     return text_result
 
 
@@ -482,7 +469,10 @@ def print_var_stats(pdf, var_names, meas_levs, grouping_variables=None, statisti
                       'skewness': lambda x: stats.skew(x, bias=False),
                       # with the bias=False it gives the same value as SPSS
                       'kurtosis': lambda x: stats.kurtosis(x, bias=False),
-                      'variation ratio': lambda x: 1 - (sum(x == stats.mode(x)[0][0]) / len(x))
+                      # for mode, use pandas.Series.mode() instead of scipy.stats.mode() because from scipy 1.11 only
+                      # numeric values are considered
+                      # TODO When there are several modes, only the first one is considered. Is this OK?
+                      'variation ratio': lambda x: 1 - (sum(x == x.mode()[0]) / len(x))
                       }
 
     text_result = ''
@@ -522,7 +512,7 @@ def print_var_stats(pdf, var_names, meas_levs, grouping_variables=None, statisti
                 text_result += _('No data')
                 for stat in statistics:
                     pdf_result.loc[stat_names[stat], group_label] = _('No data')
-    text_result += _format_html_table(pdf_result.to_html(bold_rows=False, classes="table_cs_pd"))
+    text_result += pdf_result.to_html(bold_rows=False).replace('\n', '')
     return text_result
 
 
@@ -561,11 +551,11 @@ def variable_estimation(data, statistics=None):
             pdf_result.loc[_('Median'), _('Point estimation')] = np.median(data)
             pdf_result.loc[_('Median'), _('95% confidence interval (low)')], \
             pdf_result.loc[_('Median'), _('95% confidence interval (high)')] = \
-                cs_stat_num.quantile_ci(pd.DataFrame(data))
+                cs_stat_num.quantile_ci(data)
     pdf_result = pdf_result.fillna(_('Out of the data range'))
     prec = cs_util.precision(data) + 1
-    population_param_text += _format_html_table(pdf_result.to_html(bold_rows=False, classes="table_cs_pd",
-                                                                   float_format=lambda x: '%0.*f' % (prec, x)))
+    population_param_text += pdf_result.to_html(bold_rows=False, float_format=lambda x: '%0.*f' % (prec, x)).\
+        replace('\n', '')
     return population_param_text
 
 
@@ -616,7 +606,7 @@ def variable_pair_regression_coefficients(predictors, meas_lev, normality=None, 
     multicollinearity : bool or None
         True if multicollinearity is suspected (VIF>10), False otherwise. None if the parameter was not specified.
     result: statsmodels regression result object
-        The result of the multiple regression analysis.
+        The result of the regression analysis.
 
     Returns
     -------
@@ -629,38 +619,36 @@ def variable_pair_regression_coefficients(predictors, meas_lev, normality=None, 
 
         # Warnings based on the results of the assumption tests
         if normality is None:
-            regression_coefficients += '\n<decision>' + _('Normality could not be calculated.') + ' ' +\
-                                                   _('CIs may be biased.') + '</decision>'
+            regression_coefficients += '\n<cs_decision>' + _('Normality could not be calculated') + '. ' +\
+                                                   _('CIs may be biased') + '.</cs_decision>'
         elif not normality:
-            regression_coefficients += '\n<decision>' \
-                                       + _('Assumption of normality violated for CI calculations.') + ' ' + \
-                                       _('CIs may be biased.') + '</decision>'
+            regression_coefficients += '\n<cs_decision>' \
+                                       + _('Assumption of normality violated') + '. ' + \
+                                       _('CIs may be biased') + '.</cs_decision>'
         else:
-            regression_coefficients += '\n<decision>' + _('Assumption of normality for CI calculations met.') + \
-                                       '</decision>'
+            regression_coefficients += '\n<cs_decision>' + _('Assumption of normality met') + \
+                                       '.</cs_decision>'
 
         if homoscedasticity is None:
-            regression_coefficients += '\n<decision>' + _('Homoscedasticity could not be calculated.') + ' ' + \
-                                       _('CIs may be biased.') + '</decision>'
+            regression_coefficients += '\n<cs_decision>' + _('Homoscedasticity could not be calculated') + '. ' + \
+                                       _('CIs may be biased') + '.</cs_decision>'
         elif not homoscedasticity:
-            regression_coefficients += '\n<decision>' \
-                                       + _('Assumption of homoscedasticity violated for CI calculations.') + ' ' + \
-                                       _('CIs may be biased.') + '</decision>'
+            regression_coefficients += '\n<cs_decision>' \
+                                       + _('Assumption of homoscedasticity violated') + '. ' + \
+                                       _('CIs may be biased') + '.</cs_decision>'
         else:
-            regression_coefficients += '\n<decision>' + _('Assumption of homoscedasticity for CI '
-                                                               'calculations met.') + '</decision>'
+            regression_coefficients += '\n<cs_decision>' + _('Assumption of homoscedasticity met') + '.</cs_decision>'
 
         if len(predictors) > 1:
             if multicollinearity is None:
-                regression_coefficients += '\n<decision>' + _('Multicollinearity could not be calculated.') + \
-                                           ' ' + _('Point estimates and CIs may be inaccurate.') + '</decision>'
+                regression_coefficients += '\n<cs_decision>' + _('Multicollinearity could not be calculated') + \
+                                           '. ' + _('Point estimates and CIs may be inaccurate') + '.</cs_decision>'
             elif multicollinearity:
-                regression_coefficients += '\n<decision>' \
-                                           + _('Multicollinearity suspected.') + ' ' + \
-                                           _('Point estimates and CIs may be inaccurate.') + '</decision>'
+                regression_coefficients += '\n<cs_decision>' \
+                                           + _('Multicollinearity suspected') + '. ' + \
+                                           _('Point estimates and CIs may be inaccurate') + '.</cs_decision>'
             else:
-                regression_coefficients += '\n<decision>' + _('Assumption of multicollinearity for'
-                                                                   ' CI calculations met.') + '</decision>'
+                regression_coefficients += '\n<cs_decision>' + _('Multicollinearity not detected') + '.</cs_decision>'
 
         # Gather point estimates and CIs into table
         cis = result.conf_int(alpha=0.05)
@@ -673,8 +661,7 @@ def variable_pair_regression_coefficients(predictors, meas_lev, normality=None, 
         regression_coefficients = None
 
     if regression_coefficients:
-        regression_coefficients += _format_html_table(pdf_result.to_html(bold_rows=False, escape=False,
-                                                                         classes='table_cs_pd'))
+        regression_coefficients += pdf_result.to_html(bold_rows=False, escape=False).replace('\n', '')
 
     return regression_coefficients
 
@@ -734,26 +721,26 @@ def variable_pair_standard_effect_size(data, meas_lev, sample=True, normality=No
 
             # Warnings based on the results of the assumption tests
             if normality is None:
-                standardized_effect_size_result += '\n<decision>' + _('Normality could not be calculated.') + ' ' +\
-                                                   _('CIs may be biased.') + '</decision>'
+                standardized_effect_size_result += '\n<cs_decision>' + _('Normality could not be calculated') + '. ' +\
+                                                   _('CIs may be biased') + '.</cs_decision>'
             elif not normality:
-                standardized_effect_size_result += '\n<decision>' + \
-                                                   _('Assumption of normality violated.') + ' ' + \
-                                                   _('CIs may be biased.') + '</decision>'
+                standardized_effect_size_result += '\n<cs_decision>' + \
+                                                   _('Assumption of normality violated') + '. ' + \
+                                                   _('CIs may be biased') + '.</cs_decision>'
             else:
-                standardized_effect_size_result += '\n<decision>' + \
-                                                   _('Assumption of normality met.') + '</decision>'
+                standardized_effect_size_result += '\n<cs_decision>' + \
+                                                   _('Assumption of normality met') + '.</cs_decision>'
 
             if homoscedasticity is None:
-                standardized_effect_size_result += '\n<decision>' + _('Homoscedasticity could not be calculated.') \
-                                                   + ' ' + _('CIs may be biased.') + '</decision>'
+                standardized_effect_size_result += '\n<cs_decision>' + _('Homoscedasticity could not be calculated') \
+                                                   + '. ' + _('CIs may be biased.') + '.</cs_decision>'
             elif not homoscedasticity:
-                standardized_effect_size_result += '\n<decision>' \
-                                           + _('Assumption of homoscedasticity violated.') + ' ' + \
-                                           _('CIs may be biased.') + '</decision>'
+                standardized_effect_size_result += '\n<cs_decision>' \
+                                           + _('Assumption of homoscedasticity violated') + '. ' + \
+                                           _('CIs may be biased') + '.</cs_decision>'
             else:
-                standardized_effect_size_result += '\n<decision>' + _('Assumption of homoscedasticity met.') \
-                                                   + '</decision>'
+                standardized_effect_size_result += '\n<cs_decision>' + _('Assumption of homoscedasticity met') \
+                                                   + '.</cs_decision>'
 
         if meas_lev in ['int', 'unk', 'ord']:
             df = len(data) - 2
@@ -764,12 +751,11 @@ def variable_pair_standard_effect_size(data, meas_lev, sample=True, normality=No
         elif meas_lev == 'nom':
             missing_pdf_result = True
     if not missing_pdf_result:
-        standardized_effect_size_result += _format_html_table(pdf_result.to_html(bold_rows=False, escape=False,
-                                                                                 classes='table_cs_pd'))
+        standardized_effect_size_result += pdf_result.to_html(bold_rows=False, escape=False).replace('\n', '')
     return standardized_effect_size_result
 
 
-def multiple_variables_standard_effect_size(data, predictors, y, result, normality=None, homoscedasticity=None,
+def multiple_variables_standard_effect_size(data, predictors, predicted, result, normality=None, homoscedasticity=None,
                                             multicollinearity=None, sample=True):
     """Calculate standardized effect size measures for multiple regression.
 
@@ -777,8 +763,8 @@ def multiple_variables_standard_effect_size(data, predictors, y, result, normali
     ----------
     data : pandas dataframe
     predictors : list of str
-        Name of the explanatory variables.
-    y : list of str  # TODO is there a reason why this is a list? it is inconsistent with other interfaces
+        Names of the explanatory variables.
+    predicted : str
         Name of the dependent variable.
     result : statsmodels regression result object
         The result of the multiple regression analyses.
@@ -789,7 +775,7 @@ def multiple_variables_standard_effect_size(data, predictors, y, result, normali
         True if variables are homoscedastic, False otherwise. None if homoscedasticity couldn't be calculated or
         if the parameter was not specified.
     multicollinearity : bool or None
-        True if possible multicollinearity was detected (VIF>10). None if the parameter was not specified.
+        True if possible multicollinearity was detected (VIF>10), False otherwise. None if the parameter was not specified.
     sample : bool
         True for sample descriptives, False for population estimations.
 
@@ -797,61 +783,62 @@ def multiple_variables_standard_effect_size(data, predictors, y, result, normali
     -------
     html text
     """
-    # TODO validate
 
     standardized_effect_size_result = ''
     # Warnings based on the results of the assumption tests
-    # TODO warnings should be printed only with population properties?
-    if normality is None:
-        standardized_effect_size_result += '\n<decision>' + _('Normality could not be calculated.') + ' ' + \
-                                           _('CIs may be biased.') + '</decision>'
-    elif not normality:
-        standardized_effect_size_result += '\n<decision>' + \
-                                           _('Assumption of normality violated.') + ' ' + \
-                                           _('CIs may be biased.') + '</decision>'
-    else:
-        standardized_effect_size_result += '\n<decision>' + \
-                                           _('Assumption of normality met.') + '</decision>'
+    if not sample:
+        if normality is None:
+            standardized_effect_size_result += '\n<cs_decision>' + _('Normality could not be calculated') + '. ' + \
+                                               _('CIs may be biased') + '.</cs_decision>'
+        elif not normality:
+            standardized_effect_size_result += '\n<cs_decision>' + \
+                                               _('Assumption of normality violated') + '. ' + \
+                                               _('CIs may be biased') + '.</cs_decision>'
+        else:
+            standardized_effect_size_result += '\n<cs_decision>' + \
+                                               _('Assumption of normality met') + '.</cs_decision>'
 
-    if homoscedasticity is None:
-        standardized_effect_size_result += '\n<decision>' + _('Homoscedasticity could not be calculated.') + \
-                                           ' ' + _('CIs may be biased.') + '</decision>'
-    elif not homoscedasticity:
-        standardized_effect_size_result += '\n<decision>' \
-                                           + _('Assumption of homoscedasticity violated.') + ' ' + \
-                                           _('CIs may be biased.') + '</decision>'
-    else:
-        standardized_effect_size_result += '\n<decision>' + _('Assumption of homoscedasticity met.') + '</decision>'
+        if homoscedasticity is None:
+            standardized_effect_size_result += '\n<cs_decision>' + _('Homoscedasticity could not be calculated') + \
+                                               '. ' + _('CIs may be biased') + '.</cs_decision>'
+        elif not homoscedasticity:
+            standardized_effect_size_result += '\n<cs_decision>' \
+                                               + _('Assumption of homoscedasticity violated') + '. ' + \
+                                               _('CIs may be biased') + '.</cs_decision>'
+        else:
+            standardized_effect_size_result += '\n<cs_decision>' + _('Assumption of homoscedasticity met') + \
+                                               '.</cs_decision>'
 
-    if multicollinearity is None:
-        standardized_effect_size_result += '\n<decision>' + _('Multicollinearity could not be calculated.') + \
-                                           ' ' + _('CIs may be biased.') + '</decision>'
-    elif not multicollinearity:
-        standardized_effect_size_result += '\n<decision>' \
-                                           + _('Assumption of multicollinearity violated.') + ' ' + \
-                                           _('CIs may be biased.') + '</decision>'
-    else:
-        standardized_effect_size_result += '\n<decision>' + _('Assumption of multicollinearity met.') + '</decision>'
+        if multicollinearity is None:
+            standardized_effect_size_result += '\n<cs_decision>' + _('Multicollinearity could not be calculated') + \
+                                               '. ' + _('CIs may be biased') + '.</cs_decision>'
+        elif multicollinearity:
+            standardized_effect_size_result += '\n<cs_decision>' \
+                                               + _('Multicollinearity suspected') + '. ' + \
+                                               _('CIs may be biased') + '.</cs_decision>'
+        else:
+            standardized_effect_size_result += '\n<cs_decision>' + _('Multicollinearity not detected') + \
+                                               '.</cs_decision>'
 
     # Calculate effect sizes for sample or population
     if sample:
         pdf_result_corr = pd.DataFrame()
-        standardized_effect_size_result += '\n' + _('<i>R<sup>2</sup></i> = %0.3f' % result.rsquared) + '\n'
+        pdf_result_model = pd.DataFrame(columns=['Value'])
+        pdf_result_model.loc[('<i>R<sup>2</sup></i>')] = ['%0.3f' % result.rsquared]
+        pdf_result_model.loc[_('Log-likelihood')] = ['%0.3f' % result.llf]
+        pdf_result_model.loc[_('AIC')] = ['%0.3f' % result.aic]
+        pdf_result_model.loc[_('BIC')] = ['%0.3f' % result.bic]
     else:  # population
-        pdf_result_model = pd.DataFrame(columns=[_('Point estimation'), _('95% confidence interval')])
-        pdf_result_corr = pd.DataFrame(columns=[_('Point estimation'), _('95% confidence interval')])
+        pdf_result_model = pd.DataFrame(columns=[_('Point estimate'), _('95% confidence interval')])
+        pdf_result_corr = pd.DataFrame(columns=[_('Point estimate'), _('95% confidence interval')])
 
         ci = cs_stat_num.calc_r2_ci(result.rsquared_adj, len(predictors), len(data))
-        pdf_result_model.loc[_('Adjusted <i>R<sup>2</sup></i>')] = \
+        pdf_result_model.loc[_('Adjusted') + ' <i>R<sup>2</sup></i>'] = \
             ['%0.3f' % result.rsquared_adj, '[%0.3f, %0.3f]' % (ci[0], ci[1])]
 
-        pdf_result_model.loc[_('Log-likelihood')] = ['%0.3f' % result.llf, '']
-        pdf_result_model.loc[_('AIC')] = ['%0.3f' % result.aic, '']
-        pdf_result_model.loc[_('BIC')] = ['%0.3f' % result.bic, '']
-        standardized_effect_size_result += _format_html_table(pdf_result_model.to_html(bold_rows=False, escape=False,
-                                                                                       classes='table_cs_pd')) + '\n'
 
-    standardized_effect_size_result += '\n' + _("Pearson's partial correlations")
+    standardized_effect_size_result += pdf_result_model.to_html(bold_rows=False,escape=False).replace('\n', '') + '\n'
+    standardized_effect_size_result += '\n' + _("Pearson's partial correlations with %s") % predicted
 
     for predictor in predictors:
         predictors_other = predictors.copy()
@@ -859,26 +846,25 @@ def multiple_variables_standard_effect_size(data, predictors, y, result, normali
 
         if sample:
             pdf_result_corr.loc[predictor, _('Value')] = \
-                '<i>r</i> = %0.3f' % pingouin.partial_corr(data, predictor, y[0], predictors_other)['r']
+                '<i>r</i> = %0.3f' % pingouin.partial_corr(data, predictor, predicted, predictors_other)['r']
         else:
-            partial_result = pingouin.partial_corr(data, predictor, y[0], predictors_other)
+            partial_result = pingouin.partial_corr(data, predictor, predicted, predictors_other)
             pdf_result_corr.loc[predictor + ', <i>r</i>'] = \
                 ['%0.3f' % (partial_result['r']), '[%0.3f, %0.3f]' % (partial_result['CI95%'][0][0],
                                                                       partial_result['CI95%'][0][1])]
 
-    standardized_effect_size_result += _format_html_table(pdf_result_corr.to_html(bold_rows=False, escape=False,
-                                                                                  classes='table_cs_pd'))
+    standardized_effect_size_result += pdf_result_corr.to_html(bold_rows=False, escape=False).replace('\n', '')
 
     return standardized_effect_size_result
 
 
-def correlation_matrix(data, regressors):
+def correlation_matrix(data, predictors):
     """Create Pearson's correlation matrix for assessment of multicollinearity.
 
     Parameters
     ----------
     data : pandas dataframe
-    regressors : list of str
+    predictors : list of str
         list of explanatory variable names
 
     Returns
@@ -886,14 +872,14 @@ def correlation_matrix(data, regressors):
     html text
     """
 
-    corr_table = data[regressors].corr()
+    corr_table = data[predictors].corr().round(3)
     table = _('Pearson correlation matrix of explanatory variables')
-    table += _format_html_table(corr_table.to_html(bold_rows=False, escape=False, classes='table_cs_pd')) + '\n'
+    table += corr_table.to_html(bold_rows=False, escape=False).replace('\n', '') + '\n'
     return table
 
 
 def vif_table(data, var_names):
-    """Calculate and display Variance Inflation Factors. Raises warning and displays corresponding
+    """Calculate and display Variance Inflation Factors. Raise warning and display corresponding
     auxiliary regression weights in case of suspected multicollineearity (VIF>10).
 
     Parameters
@@ -915,22 +901,22 @@ def vif_table(data, var_names):
 
     regressors = add_constant(data[var_names])
     table = _('Variance inflation factors of explanatory variables and constant')
-    vifs = pd.DataFrame([variance_inflation_factor(regressors.values, i) \
-                         for i in range(regressors.shape[1])], index=regressors.columns, columns=[_('VIF')])
-    table += _format_html_table(vifs.to_html(bold_rows=False, escape=False, classes='table_cs_pd')) + '\n'
+    vif_df = pd.DataFrame([variance_inflation_factor(regressors.values, i) \
+                           for i in range(regressors.shape[1])], index=regressors.columns, columns=[_('VIF')]).round(3)
+    table += vif_df.to_html(bold_rows=False, escape=False).replace('\n', '') + '\n'
 
     multicollinearity = False
     for regressor in var_names:
-        if vifs.loc[regressor, _('VIF')] > 10:
+        if vif_df.loc[regressor, _('VIF')] > 10:
             multicollinearity = True
-            table += '\n<decision>' + _('VIF > 10 in variable %s ') % regressor + '\n' + \
-                     _('Possible multicollinearity.') + '\n</decision>'
+            table += '\n<cs_decision>' + _('VIF > 10 in variable %s') % regressor + '\n' + \
+                     _('Possible multicollinearity') + '.\n</cs_decision>'
             regressors_other = var_names.copy()
             regressors_other.remove(regressor)
-            table += _('Beta weights when regressing %s on all other regressors.' % regressor)
+            table += _('Beta weights when regressing %s on all other regressors') % regressor + '.'
             slopes = pd.DataFrame(OLS(data[regressor], add_constant(data[regressors_other])).fit().params,
-                                  columns=[_('Slope on %s') % regressor])
-            table += _format_html_table(slopes.to_html(bold_rows=False, escape=False, classes='table_cs_pd')) + '\n'
+                                  columns=[_('Slope on %s') % regressor]).round(3)
+            table += slopes.to_html(bold_rows=False, escape=False).replace('\n', '') + '\n'
     return table, multicollinearity
 
 
@@ -963,8 +949,7 @@ def contingency_table(data_frame, x, y, count=False, percent=False, ci=False, ma
                                        columns=[data_frame[ddd] for ddd in data_frame[x]], margins=margins,
                                        margins_name=_('Total'))
         text_result += '\n%s - %s\n%s\n' % (_('Contingency table'), _('Case count'),
-                                            _format_html_table(cont_table_count.to_html(bold_rows=False,
-                                                                                        classes="table_cs_pd")))
+                                            cont_table_count.to_html(bold_rows=False).replace('\n', ''))
     if percent:
         # for the pd.crosstab() function normalize=True parameter does not work with multiple column variables
         # (neither pandas version 0.22 nor 1.0.3 works, though with different error messages), so make a workaround
@@ -974,10 +959,9 @@ def contingency_table(data_frame, x, y, count=False, percent=False, ci=False, ma
         # normalize by the total count
         cont_table_perc = cont_table_count / cont_table_count.iloc[-1, -1] * 100
         text_result += '\n%s - %s\n%s\n' % (_('Contingency table'), _('Percentage'),
-                                            _format_html_table(cont_table_perc.to_html(bold_rows=False,
-                                                                                       classes="table_cs_pd",
-                                                                                       float_format=lambda x: '%.1f%%'
-                                                                                                              % x)))
+                                            cont_table_perc.to_html(bold_rows=False,
+                                                                    float_format=lambda x: '%.1f%%' % x).
+                                            replace('\n', ''))
     if ci:
         from statsmodels.stats import proportion
         cont_table_count = pd.crosstab([data_frame[ddd] for ddd in data_frame[y]],
@@ -989,14 +973,12 @@ def contingency_table(data_frame, x, y, count=False, percent=False, ci=False, ma
                                                                                           [len(x)+1]) * 100
         text_result += '%s - %s\n%s\n' % (_('Contingency table'),
                                           _('95% confidence interval (multinomial proportions)'),
-                                            _format_html_table(cont_table_ci.to_html(bold_rows=False,
-                                                                                     classes="table_cs_pd",
-                                                                                     float_format=lambda x: '%.1f%%' %
-                                                                                                            x)))
+                                          cont_table_ci.to_html(bold_rows=False, float_format=lambda x: '%.1f%%' % x).
+                                          replace('\n', ''))
         if (cont_table_count < 5).values.any(axis=None):  # df.any(axis=None) doesn't work for some reason,
                                                           # so we use the np version
-            text_result += '<warning>' + _('Some of the cells do not include at least 5 cases, so the confidence '
-                                           'intervals may be invalid.') + '</warning>\n'
+            text_result += '<cs_warning>' + _('Some of the cells do not include at least 5 cases, so the confidence '
+                                           'intervals may be invalid.') + '</cs_warning>\n'
 
     """
     # Binomial CI with continuity correction
@@ -1006,7 +988,7 @@ def contingency_table(data_frame, x, y, count=False, percent=False, ci=False, ma
     ct_high = cont_table_perc + margin_of_error
     ct_ci = pd.concat([ct_low, ct_high], keys=[_('CI low'), _('CI high')])
     text_result += '\n%s\n%s\n' % (_('Proportions 95% CI'),
-                                  _format_html_table(ct_ci.unstack(level=0).to_html(bold_rows=False, float_format=lambda x: '%.1f%%'%x)))
+                                  cs_util.format_html_table(ct_ci.unstack(level=0).to_html(bold_rows=False, float_format=lambda x: '%.1f%%'%x)))
 
     # Binomial CI without continuity correction
     from statsmodels.stats import proportion
@@ -1094,9 +1076,8 @@ def repeated_measures_effect_size(pdf, var_names, factors, meas_level, sample=Tr
             standardized_effect_size_result = None
 
     if not pdf_result.empty:
-        standardized_effect_size_result += _format_html_table(pdf_result.to_html(bold_rows=False, escape=False,
-                                                                                 float_format=lambda x: '%0.3f' % x,
-                                                                                 classes="table_cs_pd"))
+        standardized_effect_size_result += pdf_result.to_html(bold_rows=False, escape=False,
+                                                              float_format=lambda x: '%0.3f' % x).replace('\n', '')
     return standardized_effect_size_result
 
 
@@ -1193,12 +1174,11 @@ def compare_groups_effect_size(pdf, dependent_var_name, groups, meas_level, samp
                 group_levels = sorted(set(pdf[groups + [dependent_var_name[0]]][groups[0]]))
                 if len(group_levels) == 2:
                     groups, grouped_data = _split_into_groups(pdf, dependent_var_name[0], groups)
-                    # convert pandas Float64 to float
                     pdf_result.loc[_("Cohen's d"), _('Value')] = \
-                        pingouin.compute_effsize(grouped_data[0].astype(float), grouped_data[1].astype(float),
+                        pingouin.compute_effsize(grouped_data[0], grouped_data[1],
                                                  paired=False, eftype='cohen')
                     pdf_result.loc[_("Eta-squared"), _('Value')] = \
-                        pingouin.compute_effsize(grouped_data[0].astype(float), grouped_data[1].astype(float),
+                        pingouin.compute_effsize(grouped_data[0], grouped_data[1],
                                                  paired=False, eftype='eta-square')
                 else:
                     standardized_effect_size_result = None
@@ -1228,8 +1208,7 @@ def compare_groups_effect_size(pdf, dependent_var_name, groups, meas_level, samp
                 group_levels = sorted(set(pdf[groups + [dependent_var_name[0]]][groups[0]]))
                 if len(group_levels) == 2:
                     groups, grouped_data = _split_into_groups(pdf, dependent_var_name[0], groups)
-                    # convert pandas Float64 to float
-                    hedges = pingouin.compute_effsize(grouped_data[0].astype(float), grouped_data[1].astype(float),
+                    hedges = pingouin.compute_effsize(grouped_data[0], grouped_data[1],
                                                       paired=False, eftype='hedges')
                     hedges_ci = pingouin.compute_esci(stat=hedges, nx=len(grouped_data[0]), ny=len(grouped_data[0]),
                                                       paired=False, eftype='cohen', confidence=0.95, decimals=3)
@@ -1253,9 +1232,8 @@ def compare_groups_effect_size(pdf, dependent_var_name, groups, meas_level, samp
             standardized_effect_size_result = None
 
     if not pdf_result.empty:
-        standardized_effect_size_result += _format_html_table(pdf_result.to_html(bold_rows=False, escape=False,
-                                                                                 float_format=lambda x: '%0.3f' % x,
-                                                                                 classes="table_cs_pd"))
+        standardized_effect_size_result += pdf_result.to_html(bold_rows=False, escape=False,
+                                                              float_format=lambda x: '%0.3f' % x).replace('\n', '')
 
     return standardized_effect_size_result
 
@@ -1310,16 +1288,14 @@ def reliability_internal_calc(data, sample=True):
 
     if sample:
         # Return sample properties
-        item_removed = _format_html_table(item_removed_df.to_html(bold_rows=False, escape=False,
-                                                                  float_format=lambda x: '%0.3f' % x,
-                                                                  classes="table_cs_pd", index=False))
+        item_removed = item_removed_df.to_html(bold_rows=False, escape=False,
+                                               float_format=lambda x: '%0.3f' % x, index=False).replace('\n', '')
 
     else:
         # Return population properties
         # TODO assumption checks?
-        item_removed = _format_html_table(item_removed_df_pop.to_html(bold_rows=False, escape=False,
-                                                                float_format=lambda x: '%0.3f' % x,
-                                                                classes="table_cs_pd", index=False))
+        item_removed = item_removed_df_pop.to_html(bold_rows=False, escape=False,
+                                                   float_format=lambda x: '%0.3f' % x, index=False).replace('\n', '')
 
     return alpha, item_removed
 
@@ -1368,12 +1344,10 @@ def reliability_interrater_calc(data, targets=None, raters=None, ratings=None, r
     hyp_test_table = icc.loc[slice_row][['F', 'df1', 'df2', 'pval']]
     hyp_test_table.index = row_labels
 
-    sample_result_table = _format_html_table(sample_result_df.to_html(bold_rows=False, escape=False,
-                                                                      float_format=lambda x: '%0.3f' % x,
-                                                                      classes="table_cs_pd"))
+    sample_result_table = sample_result_df.to_html(bold_rows=False, escape=False,
+                                                   float_format=lambda x: '%0.3f' % x).replace('\n', '')
 
-    population_result_table = _format_html_table(pop_result_df.to_html(bold_rows=False, escape=False,
-                                                                       float_format=lambda x: '%0.3f' % x,
-                                                                       classes="table_cs_pd"))
+    population_result_table = pop_result_df.to_html(bold_rows=False, escape=False,
+                                                    float_format=lambda x: '%0.3f' % x).replace('\n', '')
 
     return sample_result_table, population_result_table, hyp_test_table

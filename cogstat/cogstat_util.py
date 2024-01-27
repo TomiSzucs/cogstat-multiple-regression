@@ -198,7 +198,7 @@ def change_color(color, saturation=1.0, brightness=1.0):
 
 
 def convert_output(outputs):
-    """Convert output either to the GUI or to the IPython Notebook
+    """Convert output either to the GUI or to the IPython Notebook. Flat lists.
 
     Parameters
     ----------
@@ -213,12 +213,13 @@ def convert_output(outputs):
 
     import logging
     from matplotlib.figure import Figure
+    from pandas.io.formats.style import Styler
 
     if csc.output_type in ['ipnb', 'gui']:
         # convert custom notation to html
         new_output = []
         for i, output in enumerate(outputs):
-            if isinstance(output, Figure):  # keep the figure
+            if isinstance(output, (Figure, Styler)):  # keep the matplotlib figure and pandas styler
                 new_output.append(output)
             elif isinstance(output, str):
                 new_output.append(_reformat_string(output))
@@ -231,16 +232,6 @@ def convert_output(outputs):
         return new_output
     else:
         return outputs
-
-
-cs_headings = {'<cs_h1>': '<h2>',
-               '</cs_h1>': '</h2>',
-               '<cs_h2>': '<h3>',
-               '</cs_h2>': '</h3>',
-               '<cs_h3>': '<h4>',
-               '</cs_h3>': '</h4>',
-               '<cs_h4>': '<h5>',
-               '</cs_h4>': '</h5>'}
 
 
 def _reformat_string(string):
@@ -258,23 +249,15 @@ def _reformat_string(string):
     str
         reformatted output
     """
-    if isinstance(string, str):  # TODO Do we still need this in Python3?
-        string = str(string)
-
     # Change Python '\n' to html <br>
     string = string.replace('\n', '<br>')
 
-    # Change custom cogstat tags to html tags as defined in the .ini file
-    for style_element in list(csc.styles.keys()):
-        string = string.replace(style_element, csc.styles[style_element])
-        string = string.replace(str(style_element),
-                                str(csc.styles[style_element]))  # TODO Do we still need this?
-
-    # Change cogstat headings to html headings
-    for cs_heading_key in cs_headings.keys():
-        string = string.replace(cs_heading_key, cs_headings[cs_heading_key])
+    # Change custom cogstat tags to html tags as defined in the csc file
+    for cs_tag_key in csc.cs_tags.keys():
+        string = string.replace(cs_tag_key, csc.cs_tags[cs_tag_key])
 
     # In the R output the '< ' (which is non breaking space here (\xa0) )
     # would be handled as html tag in cogstat, so we change it to '&lt; '
     string = string.replace('<\xa0', '&lt; ')
+
     return string

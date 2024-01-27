@@ -30,7 +30,7 @@ def quantile_ci(data, quantile=0.5):
 
     Parameters
     ----------
-    data : pandas.DataFrame
+    data : pandas.DataFrame or pandas.Series
     quantile : float
         Quantile for which CI will be calculated. The default value is median (0.5).
 
@@ -41,10 +41,12 @@ def quantile_ci(data, quantile=0.5):
 
     """
     n = len(data)
+    data_df = pd.DataFrame(data)  # make sure that our data is Dataframe, even if Series was given
     lower_limit = (n * quantile) - (1.96 * np.sqrt(n * quantile * (1 - quantile)))
     upper_limit = 1 + (n * quantile) + (1.96 * np.sqrt(n * quantile * (1 - quantile)))
-    quantile_ci_np = np.sort(data, axis=0)[[max(0, int(np.round(lower_limit-1))),
-                                          min(n-1, int(np.round(upper_limit-1)))], :]
+    quantile_ci_np = np.sort(data_df, axis=0)[[max(0, int(np.round(lower_limit-1))),
+                                            min(n-1, int(np.round(upper_limit-1)))], :]
+    # If the rank of the lower or higher limit is beyond the dataset, set the CI as nan
     if lower_limit < 1:
         quantile_ci_np[0] = np.nan
     if upper_limit > n + 1:
@@ -103,35 +105,10 @@ def stddev_ci(stddev, n, confidence=0.95):
     return lower, upper
 
 
-def calc_se_r2(r2, k, n):
-    """Calculate standard error of R-squared estimate.
-
-    Parameters
-    ----------
-    r2 : float
-        R-squared or adjusted R-squared point estimate.
-    k : int or float
-        Number of regressors in the model.
-    n : int or float
-        Number of observations.
-
-    Based on: Cohen, J., Cohen, P., West, S.G., and Aiken, L.S. (2003). Applied Multiple Regression/Correlation
-    Analysis for the Behavioral Sciences (3rd edition). Mahwah, NJ: Lawrence Earlbaum Associates. pp. 88
-    See also: https://stats.stackexchange.com/questions/175026/formula-for-95-confidence-interval-for-r2
-
-    Returns
-    -------
-    float
-    """
-
-    numerator = 4 * r2 * ((1 - r2) ** 2) * ((n - k - 1) **2 )
-    denominator = ((n ** 2) - 1) * (3 + n)
-    se_r2 = (numerator/denominator) ** 0.5
-    return se_r2
-
-
 def calc_r2_ci(r2, k, n, alpha=0.95):
     """Calculate confidence interval of R-squared estimate.
+    # TODO is it correct to use this for adjusted R-squared?
+    # TODO formula is undefined when R-squared is negative. Is this okay?
 
     Parameters
     ----------
@@ -144,16 +121,26 @@ def calc_r2_ci(r2, k, n, alpha=0.95):
     alpha: float
         Desired level of type-I error.
 
-    Based on: Olkin, I. and Finn, J.D. (1995). Correlations Redux. Psychological Bulletin, 118(1), pp. 155-164.
+    CI calculation based on: Olkin, I. and Finn, J.D. (1995). Correlations Redux.
+    Psychological Bulletin, 118(1), pp. 155-164.
     See also: https://www.danielsoper.com/statcalc/formulas.aspx?id=28
     Validated against: https://www.danielsoper.com/statcalc/calculator.aspx?id=28 on 02/06/2022 06:03
+
+    Standard error calculations based on: Cohen, J., Cohen, P., West, S.G., and Aiken, L.S. (2003).
+    Applied Multiple Regression/Correlation Analysis for the Behavioral Sciences (3rd edition).
+    Mahwah, NJ: Lawrence Earlbaum Associates. pp. 88
+    See also: https://stats.stackexchange.com/questions/175026/formula-for-95-confidence-interval-for-r2
+
 
     Returns
     -------
     list
     """
 
-    se_r2 = calc_se_r2(r2,k,n)
+    numerator = 4 * r2 * ((1 - r2) ** 2) * ((n - k - 1) ** 2)
+    denominator = ((n ** 2) - 1) * (3 + n)
+    se_r2 = (numerator/denominator) ** 0.5
+
     t = stats.t.ppf((1 - alpha) / 2, n - k - 1)
     up = r2 + t * se_r2
     down = r2 - t * se_r2
