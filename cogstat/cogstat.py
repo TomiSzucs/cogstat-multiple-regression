@@ -1952,6 +1952,7 @@ class CogStatData:
                                                                    var_names, grouping_variables, group_levels,
                                                                    single_case_slope_SE, single_case_slope_trial_n)
         else:
+
             results['hypothesis test'] = '<cs_h3>' + _('Hypothesis tests') + '</cs_h3>' + \
                         cs_hyp_test.decision_several_grouping_variables(data, meas_level, var_names, grouping_variables)
 

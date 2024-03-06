@@ -24,6 +24,7 @@ from statsmodels.stats.contingency_tables import cochrans_q
 from statsmodels.stats.anova import AnovaRM
 from statsmodels.stats.weightstats import DescrStatsW
 import pingouin
+import itertools
 
 from . import cogstat_config as csc
 from . import cogstat_stat_num as cs_stat_num
@@ -928,7 +929,7 @@ def repeated_measures_anova(pdf, var_names, factors=None):
             temp_var_names = [previous_var_name+'_'+factor[0]+str(i)
                               for previous_var_name in temp_var_names for i in range(factor[1])]
         temp_var_names = [temp_var_name[1:] for temp_var_name in temp_var_names]
-        #print(temp_var_names)
+        factor_names = [factor[0] for factor in factors]
 
         pdf_temp = pdf[var_names]
         pdf_temp.columns = temp_var_names
@@ -936,14 +937,18 @@ def repeated_measures_anova(pdf, var_names, factors=None):
         pdf_long = pd.melt(pdf_temp, id_vars='ID', value_vars=temp_var_names)
         pdf_long = pd.concat([pdf_long, pdf_long['variable'].str.split('_', expand=True).
                              rename(columns={i: factors[i][0] for i in range(len(factors))})], axis=1)
+        print(pdf[var_names], '\n', pdf_temp, '\n', pdf_long, '\n', factor_names, factors)
+
+        # Assumption tests
+        text_result = anova_assumptions(pdf, 'int', data_long=pdf_long, repeated_factors='value',
+                                        factor_names=factor_names) + '\n'
+
 
         # Run ANOVA
-        anovarm = AnovaRM(pdf_long, 'value', 'ID', [factor[0] for factor in factors])
+        anovarm = AnovaRM(pdf_long, 'value', 'ID', factor_names)
         anova_res = anovarm.fit()
 
         # Create the text output
-        #text_result = str(anova_res)
-        text_result = ''
         for index, row in anova_res.anova_table.iterrows():
             factor_names = index.split(':')
             if len(factor_names) == 1:
@@ -955,7 +960,6 @@ def repeated_measures_anova(pdf, var_names, factors=None):
                              non_data_dim_precision, row['F Value'], print_p(row['Pr > F'])))
 
         # TODO post hoc - procedure for any number of factors (i.e., not only for two factors)
-    #print(text_result)
 
     return text_result
 
@@ -991,6 +995,55 @@ def friedman_test(pdf, var_names):
 
 
 ### Compare groups ###
+
+def anova_assumptions(data, meas_lev,  var_names=None, grouping_vars=None, repeated_factors=None, factor_names=None, data_long=None):
+    # TODO do we need this here or is it redundant?
+    data.dropna()
+
+    if grouping_vars:
+        # Making joint grouping variable
+        joined_groups = []
+        for i in range(0, len(grouping_vars)):
+            if i == 0:
+                joined_groups = data[grouping_vars[i]].astype(str)
+            else:
+                joined_groups = joined_groups + " - " + data[grouping_vars[i]].astype(str)
+        data['joined groups'] = joined_groups
+
+        non_normal_vars = []
+        norm_text = ''
+        for var_name in var_names:
+            # TODO do we need this for loop on var_names?
+            for group in data['joined groups'].unique():
+                norm, text_result = normality_test(data, data_measlevs=meas_lev, var_name=var_name,
+                                                   group_name='joined groups', group_value=group)
+                norm_text += text_result
+                if not norm:
+                    non_normal_vars.append(group)
+        var_hom_p, var_text_result = levene_test(data, var_name=var_names[0], group_name='joined groups')
+
+    if repeated_factors:
+        # TODO test with input from future mixed anova implementation
+        text_result = '<decision>' + _('Testing sphericity in each factor and their interactions') + '</decision>' + '\n'
+        factor_names_comb = []
+        for i in range(1, len(factor_names) + 1):
+            factor_names_comb += list(list(i) for i in itertools.combinations(factor_names, i))
+        for factor_name in factor_names_comb:
+            if len(factor_name) > 2:
+                text_result += '<decision>' + _("Sphericity tests not implemented for the interaction of more than 2 factors.") \
+                               + '</decision>' + '\n'
+                continue
+            other_factor_names = [factor for factor in factor_names if factor not in factor_name] + ['ID']
+            data_long['agg_id'] = data_long[other_factor_names].astype(str).agg('_'.join, axis=1)
+            data_combination = pd.pivot(data=data_long, values='value', columns=factor_name, index='agg_id')
+            spher, w, chisq, dof, wp = pingouin.sphericity(data_combination)
+            text_result += _("Result of Mauchly's test to check sphericity in %s") % \
+                           (', '.join(factor_name) if len(factor_name) > 1 else factor_name[0]) + \
+                          ': <i>W</i> = %0.*f, %s. ' % (non_data_dim_precision, w, print_p(wp)) + '\n'
+
+        return text_result
+    else:
+        return non_normal_vars, norm_text, var_hom_p, var_text_result
 
 
 def decision_one_grouping_variable(df, meas_level, data_measlevs, var_names, groups, group_levels,
@@ -1126,7 +1179,7 @@ def decision_one_grouping_variable(df, meas_level, data_measlevs, var_names, gro
     return result_ht
 
 
-def decision_several_grouping_variables(df, meas_level, var_names, groups):
+def decision_several_grouping_variables(df, meas_level, data_measlevs, var_names, groups):
     """
 
     Parameters
@@ -1152,8 +1205,28 @@ def decision_several_grouping_variables(df, meas_level, var_names, groups):
     result_ht += '<cs_decision>' + _('At least two grouping variables.') + ' </cs_decision>'
     if meas_level == 'int':
         #group_levels, vars = cs_stat._split_into_groups(df, var_names[0], groups)
-        result_ht += '<cs_decision>' + _('Interval variable.') + ' >> ' + \
-                     _("Choosing factorial ANOVA.") + '\n</cs_decision>'
+        result_ht += '<decision>' + _('Checking for normality.') + '\n</decision>'
+        non_normal_cells, norm_text, var_hom_p, var_text_result = anova_assumptions(data=df, var_names=var_names,
+                                                                                    meas_lev=data_measlevs,
+                                                                                    grouping_vars=groups)
+        result_ht += norm_text
+        if not non_normal_cells:
+            result_ht += '<decision>' + _('Assumption of normality met.') + '</decision>' + '\n'
+        else:
+            result_ht += '<decision>' + _('Assumption of normality violated in group(s) %s' %
+                                                  ', '.join(non_normal_cells)) + '</decision>' + '\n'
+
+        result_ht += '<decision>' + _('Checking for homogeneity of variance across groups.') + '\n</decision>'
+        result_ht += var_text_result
+        if var_hom_p < 0.05:
+            result_ht += '<decision>' + _('Assumption of homogeneity of variances violated. ') + '</decision>' + '\n'
+        else:
+            result_ht += '<decision>' + _('Assumption of homogeneity of variances met.') + '</decision>' + '\n'
+        result_ht += '\n'
+        if non_normal_cells or var_hom_p < 0.05:
+            result_ht += '<decision>' + _('Assumptions violated. Hypothesis tests may be inaccurate.') + '</decision>' + '\n'
+        result_ht += '<decision>' + _('Interval variable.') + ' >> ' + \
+                     _("Choosing factorial ANOVA.") + '\n</decision>'
         result_ht += multi_way_anova(df, var_names[0], groups)
 
     elif meas_level == 'ord':
@@ -1456,26 +1529,45 @@ def multi_way_anova(pdf, var_name, grouping_names):
     text_result += _('Effect size: ') + '&omega;<sup>2</sup> = %0.3g\n' % omega2
     """
 
-    """ # TODO
     # http://statsmodels.sourceforge.net/stable/stats.html#multiple-tests-and-multiple-comparison-procedures
-    if anova_result['PR(>F)'][0] < 0.05:  # post-hoc
-        post_hoc_res = sm.stats.multicomp.pairwise_tukeyhsd(np.array(data[var_name]), np.array(data[grouping_name]),
-                                                            alpha=0.05)
-        text_result += '\n' + _(u'Groups differ. Post-hoc test of the means.') + '\n'
-        text_result += ('<cs_fix_width_font>%s\n</cs_fix_width_font>' % post_hoc_res).replace(' ', u'\u00a0')
-        ''' # TODO create our own output
-        http://statsmodels.sourceforge.net/devel/generated/statsmodels.sandbox.stats.multicomp.TukeyHSDResults.html#statsmodels.sandbox.stats.multicomp.TukeyHSDResults
-        These are the original data:
-        post_hoc_res.data
-        post_hoc_res.groups
+    if any(i < 0.05 for i in anova_result['PR(>F)']):  # post-hoc
+        text_result += '\n' + _(u'Groups differ. Post-hoc test of the means.') + '\n' + '\n'
 
-        These are used for the current output:
-        post_hoc_res.groupsunique
-        post_hoc_res.meandiffs
-        post_hoc_res.confint
-        post_hoc_res.reject
-        '''
-    """
+        for factor in range(0, group_i+1):
+            # Post-hoc tests for main effects
+            if anova_result['PR(>F)'][factor] < 0.05 and len(set(pdf[grouping_names[factor]])) > 2:  # post-hoc
+                post_hoc_res = sm.stats.multicomp.pairwise_tukeyhsd(np.array(pdf[var_name]), np.array(pdf[grouping_names[factor]]))
+                text_result += _('Main effect post hoc of variable %s.' % grouping_names[factor]) + '\n'
+                text_result += ('<fix_width_font>%s\n</fix_width_font>' % post_hoc_res).replace(' ', u'\u00a0') + '\n'
+
+        for interaction in range(group_i+2, len(anova_result)-1):
+            if anova_result['PR(>F)'][interaction] < 0.05:
+                interaction_members = anova_result.index[interaction].replace(f'patsy.builtins.C(', '')
+                interaction_members = interaction_members.replace(', patsy.builtins.Sum)', '')
+                interaction_members = interaction_members.split(':')
+                for i in range(0, len(interaction_members)):
+                    if i == 0:
+                        joined_groups = pdf[interaction_members[i]].astype(str)
+                    else:
+                        joined_groups = joined_groups + " - " + pdf[interaction_members[i]].astype(str)
+
+                post_hoc_res = sm.stats.multicomp.pairwise_tukeyhsd(np.array(pdf[var_name]), np.array(joined_groups), alpha=0.05)
+                text_result += _('Interaction of %s.' % ', '.join(interaction_members)) + '\n'
+                text_result += ('<fix_width_font>%s\n</fix_width_font>' % post_hoc_res).replace(' ', u'\u00a0') + '\n'
+
+    ''' # TODO create our own output
+    http://statsmodels.sourceforge.net/devel/generated/statsmodels.sandbox.stats.multicomp.TukeyHSDResults.html#statsmodels.sandbox.stats.multicomp.TukeyHSDResults
+    These are the original data:
+    post_hoc_res.data
+    post_hoc_res.groups
+
+    These are used for the current output:
+    post_hoc_res.groupsunique
+    post_hoc_res.meandiffs
+    post_hoc_res.confint
+    post_hoc_res.reject
+    '''
+
     return text_result
 
 
